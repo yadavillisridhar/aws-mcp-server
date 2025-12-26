@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
-Simple MCP Client for AWS Documentation Server
-A straightforward implementation that connects to the AWS Documentation MCP server.
+Git MCP Client
+A client implementation for the mcp-server-git MCP server.
 """
 
 import asyncio
 import json
 import logging
-import subprocess
-import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class SimpleAWSDocsMCPClient:
-    """Simple MCP Client for AWS Documentation Server using subprocess"""
+class GitMCPClient:
+    """MCP Client for Git Server"""
     
     def __init__(self):
         self.process = None
@@ -37,14 +35,14 @@ class SimpleAWSDocsMCPClient:
         return self.request_id
     
     async def connect(self, timeout: int = 30) -> bool:
-        """Connect to the AWS Documentation MCP server with timeout"""
+        """Connect to the Git MCP server with timeout"""
         try:
-            logger.info("Starting AWS Documentation MCP server...")
+            logger.info("Starting Git MCP server...")
             
             # Start the MCP server process with timeout
             self.process = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
-                    "uvx", "awslabs.aws-documentation-mcp-server@latest",
+                    "uvx", "mcp-server-git",
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
@@ -67,7 +65,7 @@ class SimpleAWSDocsMCPClient:
                         }
                     },
                     "clientInfo": {
-                        "name": "simple-aws-docs-client",
+                        "name": "git-mcp-client",
                         "version": "1.0.0"
                     }
                 }
@@ -77,7 +75,7 @@ class SimpleAWSDocsMCPClient:
             response = await asyncio.wait_for(self._read_response(), timeout=10)
             
             if response and "result" in response:
-                logger.info("Successfully connected to AWS Documentation MCP server")
+                logger.info("Successfully connected to Git MCP server")
                 
                 # Send initialized notification
                 initialized_notification = {
@@ -99,7 +97,7 @@ class SimpleAWSDocsMCPClient:
             logger.error(f"Failed to connect to MCP server: {e}")
             await self.disconnect()
             return False
-    
+
     async def disconnect(self):
         """Disconnect from the MCP server"""
         if self.process:
@@ -107,16 +105,15 @@ class SimpleAWSDocsMCPClient:
                 # Close stdin first to signal the process to stop
                 if self.process.stdin and not self.process.stdin.is_closing():
                     self.process.stdin.close()
-                    await asyncio.sleep(0.1)  # Give it a moment to process
+                    await asyncio.sleep(0.1)
                 
                 # Try graceful termination first
-                if self.process.returncode is None:  # Process still running
+                if self.process.returncode is None:
                     self.process.terminate()
                     try:
                         await asyncio.wait_for(self.process.wait(), timeout=3)
                         logger.info("Process terminated gracefully")
                     except asyncio.TimeoutError:
-                        # Force kill if graceful termination fails
                         logger.warning("Process didn't terminate gracefully, forcing kill")
                         self.process.kill()
                         await self.process.wait()
@@ -124,7 +121,6 @@ class SimpleAWSDocsMCPClient:
                         
             except Exception as e:
                 logger.error(f"Error during disconnect: {e}")
-                # Try to kill anyway
                 try:
                     if self.process and self.process.returncode is None:
                         self.process.kill()
@@ -133,7 +129,7 @@ class SimpleAWSDocsMCPClient:
                     pass
             finally:
                 self.process = None
-                logger.info("Disconnected from AWS Documentation MCP server")
+                logger.info("Disconnected from Git MCP server")
     
     async def _send_request(self, request: Dict[str, Any]):
         """Send a JSON-RPC request to the server"""
@@ -153,7 +149,7 @@ class SimpleAWSDocsMCPClient:
             line = await asyncio.wait_for(self.process.stdout.readline(), timeout=timeout)
             if line:
                 line_str = line.decode().strip()
-                if line_str:  # Only parse non-empty lines
+                if line_str:
                     return json.loads(line_str)
             return {}
         except asyncio.TimeoutError:
@@ -161,7 +157,6 @@ class SimpleAWSDocsMCPClient:
             return {}
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
-            # Try to read stderr for more context
             if self.process.stderr:
                 try:
                     stderr_line = await asyncio.wait_for(self.process.stderr.readline(), timeout=1)
@@ -172,7 +167,7 @@ class SimpleAWSDocsMCPClient:
             return {}
     
     async def list_tools(self) -> List[Dict[str, Any]]:
-        """List available tools from the AWS Documentation server"""
+        """List available tools from the Git server"""
         try:
             request = {
                 "jsonrpc": "2.0",
@@ -181,7 +176,7 @@ class SimpleAWSDocsMCPClient:
             }
             
             await self._send_request(request)
-            response = await self._read_response(timeout=100)
+            response = await self._read_response(timeout=10)
             
             if response and "result" in response:
                 return response["result"].get("tools", [])
@@ -193,87 +188,78 @@ class SimpleAWSDocsMCPClient:
             logger.error(f"Failed to list tools: {e}")
             return []
     
-    async def search_documentation(self, search_phrase: str, **kwargs) -> Dict[str, Any]:
-        """Search AWS documentation"""
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Call a Git tool with the given arguments"""
         try:
             request = {
                 "jsonrpc": "2.0",
                 "id": self._get_next_id(),
                 "method": "tools/call",
                 "params": {
-                    "name": "search_documentation",
-                    "arguments": {
-                        "search_phrase": search_phrase,
-                        **kwargs
-                    }
+                    "name": tool_name,
+                    "arguments": arguments
                 }
             }
             
             await self._send_request(request)
-            response = await self._read_response(timeout=30)  # Longer timeout for search
-            print(f'Response received from MCP Server : {response}')
+            response = await self._read_response(timeout=30)
+            
             if response and "result" in response:
-                content = response["result"].get("content", [])
-                if content and len(content) > 0:
-                    text_content = content[0]["text"]
-                    # Try to parse as JSON, if it fails return as text
-                    try:
-                        return json.loads(text_content)
-                    except json.JSONDecodeError:
-                        return {"text": text_content}
-                return {}
+                return response["result"]
             else:
-                logger.error(f"Failed to search documentation: {response}")
-                return {"error": "Failed to search documentation"}
+                logger.error(f"Failed to call tool {tool_name}: {response}")
+                return {"error": f"Failed to call tool {tool_name}"}
                 
         except Exception as e:
-            logger.error(f"Failed to search documentation: {e}")
+            logger.error(f"Failed to call tool {tool_name}: {e}")
             return {"error": str(e)}
     
-    async def read_documentation(self, url: str, **kwargs) -> str:
-        """Read a specific AWS documentation page"""
-        try:
-            request = {
-                "jsonrpc": "2.0",
-                "id": self._get_next_id(),
-                "method": "tools/call",
-                "params": {
-                    "name": "read_documentation",
-                    "arguments": {
-                        "url": url,
-                        **kwargs
-                    }
-                }
-            }
-            
-            await self._send_request(request)
-            response = await self._read_response(timeout=30)  # Longer timeout for reading docs
-            
-            if response and "result" in response:
-                content = response["result"].get("content", [])
-                if content and len(content) > 0:
-                    return content[0]["text"]
-                return ""
-            else:
-                logger.error(f"Failed to read documentation: {response}")
-                return f"Error: Failed to read documentation"
-                
-        except Exception as e:
-            logger.error(f"Failed to read documentation: {e}")
-            return f"Error: {str(e)}"
+    # Git-specific convenience methods
+    async def git_status(self, repo_path: Optional[str] = None) -> Dict[str, Any]:
+        """Get git status"""
+        args = {}
+        if repo_path:
+            args["repo_path"] = repo_path
+        return await self.call_tool("git_status", args)
+    
+    async def git_log(self, repo_path: Optional[str] = None, max_count: int = 10) -> Dict[str, Any]:
+        """Get git log"""
+        args = {"max_count": max_count}
+        if repo_path:
+            args["repo_path"] = repo_path
+        return await self.call_tool("git_log", args)
+    
+    async def git_diff(self, repo_path: Optional[str] = None, cached: bool = False) -> Dict[str, Any]:
+        """Get git diff"""
+        args = {"cached": cached}
+        if repo_path:
+            args["repo_path"] = repo_path
+        return await self.call_tool("git_diff", args)
+    
+    async def git_commit(self, message: str, repo_path: Optional[str] = None) -> Dict[str, Any]:
+        """Create a git commit"""
+        args = {"message": message}
+        if repo_path:
+            args["repo_path"] = repo_path
+        return await self.call_tool("git_commit", args)
+    
+    async def git_add(self, files: List[str], repo_path: Optional[str] = None) -> Dict[str, Any]:
+        """Stage files for commit"""
+        args = {"files": files}
+        if repo_path:
+            args["repo_path"] = repo_path
+        return await self.call_tool("git_add", args)
 
 
 async def main():
-    """Example usage of the Simple AWS Documentation MCP client"""
-    client = SimpleAWSDocsMCPClient()
+    """Example usage of the Git MCP client"""
+    client = GitMCPClient()
     
     try:
-        print("Connecting to AWS Documentation MCP server...")
-        print("This may take 30-60 seconds on first run as the server downloads...")
+        print("Connecting to Git MCP server...")
         
-        # Connect to the server with timeout
-        if not await client.connect(timeout=100):  # Increased timeout for first run
-            print("Failed to connect to AWS Documentation MCP server")
+        if not await client.connect(timeout=30):
+            print("Failed to connect to Git MCP server")
             return
         
         print("Connected successfully!")
@@ -285,25 +271,22 @@ async def main():
         for tool in tools:
             print(f"- {tool.get('name', 'Unknown')}: {tool.get('description', 'No description')}")
         
-        # Example search
+        # Example: Get git status
         print("\n" + "="*50)
-        print("Example: Searching for S3 documentation")
-        result = await client.search_documentation("S3 bucket policies")
+        print("Example: Getting git status")
+        result = await client.git_status()
         print(json.dumps(result, indent=2))
         
-        # Example read (if we have a URL from search results)
-        if result.get("search_results") and len(result["search_results"]) > 0:
-            first_url = result["search_results"][0]["url"]
-            print(f"\n" + "="*50)
-            print(f"Example: Reading documentation from {first_url}")
-            #content = await client.read_documentation(first_url, max_length=1000)
-            #print(content[:500] + "..." if len(content) > 500 else content)
+        # Example: Get git log
+        print("\n" + "="*50)
+        print("Example: Getting git log (last 5 commits)")
+        result = await client.git_log(max_count=5)
+        print(json.dumps(result, indent=2))
         
     except Exception as e:
         logger.error(f"Error in main: {e}")
     
     finally:
-        # Always disconnect
         print("\nDisconnecting...")
         await client.disconnect()
         print("Done!")

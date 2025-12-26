@@ -8,6 +8,10 @@
       },
       "disabled": false,
       "autoApprove": []
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git"]
     }
   }
 }
