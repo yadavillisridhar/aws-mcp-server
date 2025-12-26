@@ -181,7 +181,7 @@ class SimpleAWSDocsMCPClient:
             }
             
             await self._send_request(request)
-            response = await self._read_response(timeout=15)
+            response = await self._read_response(timeout=100)
             
             if response and "result" in response:
                 return response["result"].get("tools", [])
@@ -272,7 +272,7 @@ async def main():
         print("This may take 30-60 seconds on first run as the server downloads...")
         
         # Connect to the server with timeout
-        if not await client.connect(timeout=60):  # Increased timeout for first run
+        if not await client.connect(timeout=100):  # Increased timeout for first run
             print("Failed to connect to AWS Documentation MCP server")
             return
         
