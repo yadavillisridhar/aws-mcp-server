@@ -1,0 +1,12 @@
+{
+  "name": "aws-mcp-server",
+  "version": "1.0.0",
+  "description": "AWS MCP Server",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["aws", "mcp", "server"],
+  "author": "",
+  "license": "ISC"
+}
