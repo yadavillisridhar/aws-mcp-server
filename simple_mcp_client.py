@@ -104,16 +104,33 @@ class SimpleAWSDocsMCPClient:
         """Disconnect from the MCP server"""
         if self.process:
             try:
+                # Close stdin first to signal the process to stop
+                if self.process.stdin and not self.process.stdin.is_closing():
+                    self.process.stdin.close()
+                    await asyncio.sleep(0.1)  # Give it a moment to process
+                
                 # Try graceful termination first
-                self.process.terminate()
-                await asyncio.wait_for(self.process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                # Force kill if graceful termination fails
-                logger.warning("Process didn't terminate gracefully, forcing kill")
-                self.process.kill()
-                await self.process.wait()
+                if self.process.returncode is None:  # Process still running
+                    self.process.terminate()
+                    try:
+                        await asyncio.wait_for(self.process.wait(), timeout=3)
+                        logger.info("Process terminated gracefully")
+                    except asyncio.TimeoutError:
+                        # Force kill if graceful termination fails
+                        logger.warning("Process didn't terminate gracefully, forcing kill")
+                        self.process.kill()
+                        await self.process.wait()
+                        logger.info("Process killed forcefully")
+                        
             except Exception as e:
                 logger.error(f"Error during disconnect: {e}")
+                # Try to kill anyway
+                try:
+                    if self.process and self.process.returncode is None:
+                        self.process.kill()
+                        await self.process.wait()
+                except:
+                    pass
             finally:
                 self.process = None
                 logger.info("Disconnected from AWS Documentation MCP server")
